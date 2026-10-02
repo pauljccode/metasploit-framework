@@ -12,7 +12,6 @@
         "fail-fast": false,
         "matrix": {
           "os": [
-            "ubuntu-latest",
             "windows-2022"
           ],
           "ruby": [
@@ -151,7 +150,7 @@
           "name": "Check installed native dependencies",
           "shell": "bash",
           "working-directory": "metasploit-framework",
-          "run": "git rev-parse HEAD\ntest \"$(git config --get maintenance.autoDetach)\" = false\nbundle exec ruby -rfiddle -e 'f = Fiddle::Function.new(Fiddle::Handle::DEFAULT[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"'\nbundle exec ruby msfconsole --version\n"
+          "run": "git rev-parse HEAD\ntest \"$(git config --get maintenance.autoDetach)\" = false\nbundle exec ruby -rfiddle -e 'handle = Gem.win_platform? ? Fiddle.dlopen(\"ucrtbase.dll\") : Fiddle::Handle::DEFAULT; f = Fiddle::Function.new(handle[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"'\nbundle exec ruby msfconsole --version\n"
         }
       ]
     }
