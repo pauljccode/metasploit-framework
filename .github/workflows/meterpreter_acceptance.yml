@@ -1,5 +1,5 @@
 {
-  "name": "Reproduce native cache contamination",
+  "name": "Acceptance dependency smoke",
   "on": {
     "workflow_dispatch": {}
   },
@@ -7,26 +7,27 @@
     "contents": "read"
   },
   "jobs": {
-    "seed": {
+    "fixed": {
       "strategy": {
         "fail-fast": false,
         "matrix": {
           "os": [
-            "macos-15-intel"
+            "ubuntu-latest",
+            "windows-2022"
           ],
           "ruby": [
             "3.4"
           ],
           "meterpreter": [
             {
-              "name": "php",
-              "runtime_version": "5.3"
+              "name": "java",
+              "runtime_version": 21
             }
           ]
         }
       },
       "runs-on": "${{ matrix.os }}",
-      "timeout-minutes": 20,
+      "timeout-minutes": 30,
       "env": {
         "RAILS_ENV": "test",
         "HOST_RUNNER_IMAGE": "${{ matrix.os }}",
@@ -34,7 +35,7 @@
         "SESSION_RUNTIME_VERSION": "${{ matrix.meterpreter.runtime_version }}",
         "BUNDLE_WITHOUT": "coverage development"
       },
-      "name": "cache proof seed",
+      "name": "dependency smoke ${{ matrix.os }}",
       "steps": [
         {
           "name": "Install system dependencies (Linux)",
@@ -142,313 +143,17 @@
           "with": {
             "ruby-version": "${{ matrix.ruby }}",
             "bundler-cache": true,
-            "cache-version": "cache-isolation-proof-1",
+            "cache-version": "6-${{ matrix.meterpreter.name }}-${{ matrix.meterpreter.runtime_version }}",
             "working-directory": "metasploit-framework"
           }
         },
         {
-          "name": "Check cache isolation",
+          "name": "Check installed native dependencies",
           "shell": "bash",
           "working-directory": "metasploit-framework",
-          "run": "bundle exec ruby -rfiddle -rdigest -e 'f = Fiddle::Function.new(Fiddle::Handle::DEFAULT[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"; $LOADED_FEATURES.grep(/fiddle\\.bundle$/).each { |path| puts \"FIDDLE_SHA256=#{Digest::SHA256.file(path).hexdigest}\"; abort \"otool failed\" unless system(\"otool\", \"-L\", path) }'\n"
+          "run": "git rev-parse HEAD\ntest \"$(git config --get maintenance.autoDetach)\" = false\nbundle exec ruby -rfiddle -e 'f = Fiddle::Function.new(Fiddle::Handle::DEFAULT[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"'\nbundle exec ruby msfconsole --version\n"
         }
       ]
-    },
-    "shared": {
-      "strategy": {
-        "fail-fast": false,
-        "matrix": {
-          "os": [
-            "macos-15-intel"
-          ],
-          "ruby": [
-            "3.4"
-          ],
-          "meterpreter": [
-            {
-              "name": "java",
-              "runtime_version": 21
-            }
-          ]
-        }
-      },
-      "runs-on": "${{ matrix.os }}",
-      "timeout-minutes": 20,
-      "env": {
-        "RAILS_ENV": "test",
-        "HOST_RUNNER_IMAGE": "${{ matrix.os }}",
-        "SESSION": "meterpreter/${{ matrix.meterpreter.name }}",
-        "SESSION_RUNTIME_VERSION": "${{ matrix.meterpreter.runtime_version }}",
-        "BUNDLE_WITHOUT": "coverage development"
-      },
-      "name": "cache proof shared",
-      "steps": [
-        {
-          "name": "Install system dependencies (Linux)",
-          "if": "runner.os == 'Linux'",
-          "run": "sudo apt-get -y --no-install-recommends install libpcap-dev graphviz"
-        },
-        {
-          "name": "Use setup-php@2.31.1 to install PHP for Windows runners",
-          "uses": "shivammathur/setup-php@c541c155eee45413f5b09a52248675b1a2575231",
-          "if": "${{ matrix.meterpreter.name == 'php' && runner.os == 'Windows' }}",
-          "with": {
-            "php-version": "${{ matrix.meterpreter.runtime_version }}",
-            "tools": "none"
-          }
-        },
-        {
-          "name": "Use setup-php@2.37.0 to install PHP for non-Windows runners",
-          "uses": "shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f",
-          "if": "${{ matrix.meterpreter.name == 'php' && runner.os != 'Windows' }}",
-          "with": {
-            "php-version": "${{ matrix.meterpreter.runtime_version }}",
-            "tools": "none"
-          }
-        },
-        {
-          "name": "Set up Python",
-          "if": "${{ matrix.meterpreter.name == 'python' }}",
-          "uses": "actions/setup-python@v5",
-          "with": {
-            "python-version": "${{ matrix.meterpreter.runtime_version }}"
-          }
-        },
-        {
-          "uses": "actions/setup-java@v4",
-          "if": "${{ matrix.meterpreter.name == 'java' }}",
-          "with": {
-            "distribution": "temurin",
-            "java-version": "${{ matrix.meterpreter.runtime_version }}"
-          }
-        },
-        {
-          "name": "Install system dependencies (Windows)",
-          "shell": "pwsh",
-          "if": "runner.os == 'Windows'",
-          "run": "$ErrorActionPreference = 'Stop'\n# pcap dependencies\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\nInvoke-WebRequest -Uri 'https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip' -OutFile 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -SkipCertificateCheck\n$expected = 'ea799cf2f26e4afb1892938070fd2b1ca37ce5cf75fec4349247df12b784edbd'\n$actual = (Get-FileHash 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -Algorithm SHA256).Hash.ToLower()\nif ($actual -ne $expected) { throw \"WpdPack_4_1_2.zip SHA256 mismatch: expected $expected, got $actual\" }\n\nchoco install 7zip -y --no-progress\nif ($LASTEXITCODE -ne 0) { throw \"choco install 7zip failed with exit code $LASTEXITCODE\" }\n\n7z x \"C:\\Windows\\Temp\\WpdPack_4_1_2.zip\" -o\"C:\\\"\nif ($LASTEXITCODE -ne 0) { throw \"7z extraction failed with exit code $LASTEXITCODE\" }\n"
-        },
-        {
-          "name": "Checkout mettle",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "uses": "actions/checkout@v4",
-          "with": {
-            "repository": "rapid7/mettle",
-            "path": "mettle",
-            "ref": ""
-          }
-        },
-        {
-          "name": "Get mettle version",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "run": "echo \"METTLE_VERSION=$(ruby -ne \"puts Regexp.last_match(1) if /VERSION\\s+=\\s+'([^']+)'/\" lib/metasploit_payloads/mettle/version.rb)\" | tee -a $GITHUB_ENV",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Prerequisite mettle gem setup",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "run": "set -x\nruby -pi.bak -e \"gsub(/${{ env.METTLE_VERSION }}/, '${{ env.METTLE_VERSION }}-dev')\" lib/metasploit_payloads/mettle/version.rb\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Compile mettle payloads",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os != 'macos' && false }}",
-          "run": "docker run --rm=true --tty --volume=$(pwd):/mettle --workdir=/mettle rapid7/build:mettle rake mettle:build mettle:check\nrake build\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Compile mettle payloads - macOS",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os == 'macos' && false }}",
-          "run": "make TARGET=x86_64-apple-darwin\nrake build\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Checkout metasploit-framework commit",
-          "uses": "actions/checkout@v4",
-          "with": {
-            "repository": "rapid7/metasploit-framework",
-            "path": "metasploit-framework",
-            "ref": "5e598d5233bebecef2a44904a286769d83d31d12"
-          }
-        },
-        {
-          "name": "Support longpaths when running on Windows",
-          "if": "runner.os == 'Windows'",
-          "run": "git config --system core.longpaths true"
-        },
-        {
-          "name": "Complete Git maintenance before Bundler",
-          "run": "git config --global maintenance.autoDetach false"
-        },
-        {
-          "name": "Setup Ruby",
-          "env": {
-            "PKG_CONFIG_PATH": "/usr/local/opt/libpq/lib/pkgconfig"
-          },
-          "uses": "ruby/setup-ruby@eaecf785f6a34567a6d97f686bbb7bccc1ac1e5c",
-          "with": {
-            "ruby-version": "${{ matrix.ruby }}",
-            "bundler-cache": true,
-            "cache-version": "cache-isolation-proof-1",
-            "working-directory": "metasploit-framework"
-          }
-        },
-        {
-          "name": "Check cache isolation",
-          "shell": "bash",
-          "working-directory": "metasploit-framework",
-          "run": "bundle exec ruby -e 'begin; require \"fiddle\"; rescue LoadError => error; abort error.full_message unless error.message.include?(\"/opt/local/lib/libffi.8.dylib\"); puts \"SHARED_CACHE_FAILURE_REPRODUCED\"; puts error.message; exit 0; end; abort \"Expected cross-runtime cache failure was not reproduced\"'\n"
-        }
-      ],
-      "needs": "seed"
-    },
-    "isolated": {
-      "strategy": {
-        "fail-fast": false,
-        "matrix": {
-          "os": [
-            "macos-15-intel"
-          ],
-          "ruby": [
-            "3.4"
-          ],
-          "meterpreter": [
-            {
-              "name": "java",
-              "runtime_version": 21
-            }
-          ]
-        }
-      },
-      "runs-on": "${{ matrix.os }}",
-      "timeout-minutes": 20,
-      "env": {
-        "RAILS_ENV": "test",
-        "HOST_RUNNER_IMAGE": "${{ matrix.os }}",
-        "SESSION": "meterpreter/${{ matrix.meterpreter.name }}",
-        "SESSION_RUNTIME_VERSION": "${{ matrix.meterpreter.runtime_version }}",
-        "BUNDLE_WITHOUT": "coverage development"
-      },
-      "name": "cache proof isolated",
-      "steps": [
-        {
-          "name": "Install system dependencies (Linux)",
-          "if": "runner.os == 'Linux'",
-          "run": "sudo apt-get -y --no-install-recommends install libpcap-dev graphviz"
-        },
-        {
-          "name": "Use setup-php@2.31.1 to install PHP for Windows runners",
-          "uses": "shivammathur/setup-php@c541c155eee45413f5b09a52248675b1a2575231",
-          "if": "${{ matrix.meterpreter.name == 'php' && runner.os == 'Windows' }}",
-          "with": {
-            "php-version": "${{ matrix.meterpreter.runtime_version }}",
-            "tools": "none"
-          }
-        },
-        {
-          "name": "Use setup-php@2.37.0 to install PHP for non-Windows runners",
-          "uses": "shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f",
-          "if": "${{ matrix.meterpreter.name == 'php' && runner.os != 'Windows' }}",
-          "with": {
-            "php-version": "${{ matrix.meterpreter.runtime_version }}",
-            "tools": "none"
-          }
-        },
-        {
-          "name": "Set up Python",
-          "if": "${{ matrix.meterpreter.name == 'python' }}",
-          "uses": "actions/setup-python@v5",
-          "with": {
-            "python-version": "${{ matrix.meterpreter.runtime_version }}"
-          }
-        },
-        {
-          "uses": "actions/setup-java@v4",
-          "if": "${{ matrix.meterpreter.name == 'java' }}",
-          "with": {
-            "distribution": "temurin",
-            "java-version": "${{ matrix.meterpreter.runtime_version }}"
-          }
-        },
-        {
-          "name": "Install system dependencies (Windows)",
-          "shell": "pwsh",
-          "if": "runner.os == 'Windows'",
-          "run": "$ErrorActionPreference = 'Stop'\n# pcap dependencies\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\nInvoke-WebRequest -Uri 'https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip' -OutFile 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -SkipCertificateCheck\n$expected = 'ea799cf2f26e4afb1892938070fd2b1ca37ce5cf75fec4349247df12b784edbd'\n$actual = (Get-FileHash 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -Algorithm SHA256).Hash.ToLower()\nif ($actual -ne $expected) { throw \"WpdPack_4_1_2.zip SHA256 mismatch: expected $expected, got $actual\" }\n\nchoco install 7zip -y --no-progress\nif ($LASTEXITCODE -ne 0) { throw \"choco install 7zip failed with exit code $LASTEXITCODE\" }\n\n7z x \"C:\\Windows\\Temp\\WpdPack_4_1_2.zip\" -o\"C:\\\"\nif ($LASTEXITCODE -ne 0) { throw \"7z extraction failed with exit code $LASTEXITCODE\" }\n"
-        },
-        {
-          "name": "Checkout mettle",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "uses": "actions/checkout@v4",
-          "with": {
-            "repository": "rapid7/mettle",
-            "path": "mettle",
-            "ref": ""
-          }
-        },
-        {
-          "name": "Get mettle version",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "run": "echo \"METTLE_VERSION=$(ruby -ne \"puts Regexp.last_match(1) if /VERSION\\s+=\\s+'([^']+)'/\" lib/metasploit_payloads/mettle/version.rb)\" | tee -a $GITHUB_ENV",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Prerequisite mettle gem setup",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
-          "run": "set -x\nruby -pi.bak -e \"gsub(/${{ env.METTLE_VERSION }}/, '${{ env.METTLE_VERSION }}-dev')\" lib/metasploit_payloads/mettle/version.rb\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Compile mettle payloads",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os != 'macos' && false }}",
-          "run": "docker run --rm=true --tty --volume=$(pwd):/mettle --workdir=/mettle rapid7/build:mettle rake mettle:build mettle:check\nrake build\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Compile mettle payloads - macOS",
-          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os == 'macos' && false }}",
-          "run": "make TARGET=x86_64-apple-darwin\nrake build\n",
-          "working-directory": "mettle"
-        },
-        {
-          "name": "Checkout metasploit-framework commit",
-          "uses": "actions/checkout@v4",
-          "with": {
-            "repository": "rapid7/metasploit-framework",
-            "path": "metasploit-framework",
-            "ref": "5e598d5233bebecef2a44904a286769d83d31d12"
-          }
-        },
-        {
-          "name": "Support longpaths when running on Windows",
-          "if": "runner.os == 'Windows'",
-          "run": "git config --system core.longpaths true"
-        },
-        {
-          "name": "Complete Git maintenance before Bundler",
-          "run": "git config --global maintenance.autoDetach false"
-        },
-        {
-          "name": "Setup Ruby",
-          "env": {
-            "PKG_CONFIG_PATH": "/usr/local/opt/libpq/lib/pkgconfig"
-          },
-          "uses": "ruby/setup-ruby@eaecf785f6a34567a6d97f686bbb7bccc1ac1e5c",
-          "with": {
-            "ruby-version": "${{ matrix.ruby }}",
-            "bundler-cache": true,
-            "cache-version": "6-java-21",
-            "working-directory": "metasploit-framework"
-          }
-        },
-        {
-          "name": "Check cache isolation",
-          "shell": "bash",
-          "working-directory": "metasploit-framework",
-          "run": "bundle exec ruby -rfiddle -rdigest -e 'f = Fiddle::Function.new(Fiddle::Handle::DEFAULT[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"; $LOADED_FEATURES.grep(/fiddle\\.bundle$/).each { |path| puts \"FIDDLE_SHA256=#{Digest::SHA256.file(path).hexdigest}\"; abort \"otool failed\" unless system(\"otool\", \"-L\", path) }'\n"
-        }
-      ],
-      "needs": "seed"
     }
   }
 }
