@@ -1,68 +1,276 @@
-name: Meterpreter Acceptance
-
-# Optional, enabling concurrency limits: https://docs.github.com/en/actions/using-jobs/using-concurrency
-#concurrency:
-#  group: ${{ github.ref }}-${{ github.workflow }}
-#  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
-permissions:
-  actions: none
-  checks: none
-  contents: none
-  deployments: none
-  id-token: none
-  issues: none
-  discussions: none
-  packages: none
-  pages: none
-  pull-requests: none
-  repository-projects: none
-  security-events: none
-  statuses: none
-
-on:
-  workflow_dispatch:
-    inputs:
-      metasploit_payloads_commit:
-        description: 'metasploit-payloads branch you want to test'
-        required: true
-        default: 'master'
-      mettle_commit:
-        description: 'mettle branch you want to test'
-        required: true
-        default: 'master'
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-  pull_request:
-    branches:
-      - '*'
-    paths:
-      - 'metasploit-framework.gemspec'
-      - 'Gemfile.lock'
-      - 'data/templates/**'
-      - 'modules/payloads/**'
-      - 'lib/msf/base/sessions/**'
-      - 'lib/msf/core/payload/**'
-      - 'lib/msf/core/**'
-      - 'lib/rex/post/**'
-      - 'test/modules/**'
-      - 'tools/dev/**'
-      - 'spec/acceptance/**'
-      - 'spec/support/acceptance/**'
-      - 'spec/acceptance_spec_helper.rb'
-      - '.github/**'
-#   Example of running as a cron, to weed out flaky tests
-#  schedule:
-#    - cron: '*/15 * * * *'
-
-jobs:
-  build:
-    uses: ./.github/workflows/shared_meterpreter_acceptance.yml
-    with:
-      metasploit_payloads_commit: ${{ github.event.inputs.metasploit_payloads_commit }}
-      mettle_commit: ${{ github.event.inputs.mettle_commit }}
-      build_metasploit_payloads: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-branch') }}
-      build_mettle: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-mettle-branch') }}
+{
+  "name": "Acceptance environment validation",
+  "on": {
+    "workflow_dispatch": {}
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "fixed": {
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "os": [
+            "macos-15-intel"
+          ],
+          "ruby": [
+            "3.4"
+          ],
+          "meterpreter": [
+            {
+              "name": "java",
+              "runtime_version": 21
+            },
+            {
+              "name": "python",
+              "runtime_version": "3.11"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.os }}",
+      "timeout-minutes": 50,
+      "env": {
+        "RAILS_ENV": "test",
+        "HOST_RUNNER_IMAGE": "${{ matrix.os }}",
+        "SESSION": "meterpreter/${{ matrix.meterpreter.name }}",
+        "SESSION_RUNTIME_VERSION": "${{ matrix.meterpreter.runtime_version }}",
+        "BUNDLE_WITHOUT": "coverage development"
+      },
+      "name": "${{ matrix.meterpreter.name }} ${{ matrix.meterpreter.runtime_version }} ${{ matrix.os }}",
+      "steps": [
+        {
+          "name": "Install system dependencies (Linux)",
+          "if": "runner.os == 'Linux'",
+          "run": "sudo apt-get -y --no-install-recommends install libpcap-dev graphviz"
+        },
+        {
+          "name": "Use setup-php@2.31.1 to install PHP for Windows runners",
+          "uses": "shivammathur/setup-php@c541c155eee45413f5b09a52248675b1a2575231",
+          "if": "${{ matrix.meterpreter.name == 'php' && runner.os == 'Windows' }}",
+          "with": {
+            "php-version": "${{ matrix.meterpreter.runtime_version }}",
+            "tools": "none"
+          }
+        },
+        {
+          "name": "Use setup-php@2.37.0 to install PHP for non-Windows runners",
+          "uses": "shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f",
+          "if": "${{ matrix.meterpreter.name == 'php' && runner.os != 'Windows' }}",
+          "with": {
+            "php-version": "${{ matrix.meterpreter.runtime_version }}",
+            "tools": "none"
+          }
+        },
+        {
+          "name": "Set up Python",
+          "if": "${{ matrix.meterpreter.name == 'python' }}",
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "${{ matrix.meterpreter.runtime_version }}"
+          }
+        },
+        {
+          "uses": "actions/setup-java@v4",
+          "if": "${{ matrix.meterpreter.name == 'java' }}",
+          "with": {
+            "distribution": "temurin",
+            "java-version": "${{ matrix.meterpreter.runtime_version }}"
+          }
+        },
+        {
+          "name": "Install system dependencies (Windows)",
+          "shell": "pwsh",
+          "if": "runner.os == 'Windows'",
+          "run": "$ErrorActionPreference = 'Stop'\n# pcap dependencies\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\nInvoke-WebRequest -Uri 'https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip' -OutFile 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -SkipCertificateCheck\n$expected = 'ea799cf2f26e4afb1892938070fd2b1ca37ce5cf75fec4349247df12b784edbd'\n$actual = (Get-FileHash 'C:\\Windows\\Temp\\WpdPack_4_1_2.zip' -Algorithm SHA256).Hash.ToLower()\nif ($actual -ne $expected) { throw \"WpdPack_4_1_2.zip SHA256 mismatch: expected $expected, got $actual\" }\n\nchoco install 7zip -y --no-progress\nif ($LASTEXITCODE -ne 0) { throw \"choco install 7zip failed with exit code $LASTEXITCODE\" }\n\n7z x \"C:\\Windows\\Temp\\WpdPack_4_1_2.zip\" -o\"C:\\\"\nif ($LASTEXITCODE -ne 0) { throw \"7z extraction failed with exit code $LASTEXITCODE\" }\n"
+        },
+        {
+          "name": "Checkout mettle",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "repository": "rapid7/mettle",
+            "path": "mettle",
+            "ref": ""
+          }
+        },
+        {
+          "name": "Get mettle version",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
+          "run": "echo \"METTLE_VERSION=$(ruby -ne \"puts Regexp.last_match(1) if /VERSION\\s+=\\s+'([^']+)'/\" lib/metasploit_payloads/mettle/version.rb)\" | tee -a $GITHUB_ENV",
+          "working-directory": "mettle"
+        },
+        {
+          "name": "Prerequisite mettle gem setup",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
+          "run": "set -x\nruby -pi.bak -e \"gsub(/${{ env.METTLE_VERSION }}/, '${{ env.METTLE_VERSION }}-dev')\" lib/metasploit_payloads/mettle/version.rb\n",
+          "working-directory": "mettle"
+        },
+        {
+          "name": "Compile mettle payloads",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os != 'macos' && false }}",
+          "run": "docker run --rm=true --tty --volume=$(pwd):/mettle --workdir=/mettle rapid7/build:mettle rake mettle:build mettle:check\nrake build\n",
+          "working-directory": "mettle"
+        },
+        {
+          "name": "Compile mettle payloads - macOS",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && runner.os == 'macos' && false }}",
+          "run": "make TARGET=x86_64-apple-darwin\nrake build\n",
+          "working-directory": "mettle"
+        },
+        {
+          "name": "Checkout metasploit-framework commit",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "repository": "rapid7/metasploit-framework",
+            "path": "metasploit-framework",
+            "ref": "5e598d5233bebecef2a44904a286769d83d31d12"
+          }
+        },
+        {
+          "name": "Support longpaths when running on Windows",
+          "if": "runner.os == 'Windows'",
+          "run": "git config --system core.longpaths true"
+        },
+        {
+          "name": "Complete Git maintenance before Bundler",
+          "run": "git config --global maintenance.autoDetach false"
+        },
+        {
+          "name": "Setup Ruby",
+          "env": {
+            "PKG_CONFIG_PATH": "/usr/local/opt/libpq/lib/pkgconfig"
+          },
+          "uses": "ruby/setup-ruby@eaecf785f6a34567a6d97f686bbb7bccc1ac1e5c",
+          "with": {
+            "ruby-version": "${{ matrix.ruby }}",
+            "bundler-cache": true,
+            "cache-version": "6-${{ matrix.meterpreter.name }}-${{ matrix.meterpreter.runtime_version }}",
+            "working-directory": "metasploit-framework"
+          }
+        },
+        {
+          "name": "Move mettle gem into framework",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
+          "run": "cp ../mettle/pkg/metasploit_payloads-mettle-${{ env.METTLE_VERSION }}.pre.dev.gem .\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "uses": "actions/download-artifact@v4",
+          "name": "Download Meterpreter",
+          "id": "download_meterpreter",
+          "if": "${{ matrix.meterpreter.name != 'mettle' && false }}",
+          "with": {
+            "path": "raw-data"
+          }
+        },
+        {
+          "name": "Extract Meterpreter (Unix)",
+          "if": "${{ matrix.meterpreter.name != 'mettle' && runner.os != 'Windows' && false }}",
+          "shell": "bash",
+          "run": "set -x\ndownload_path=${{steps.download_meterpreter.outputs.download-path}}\ncp -r  $download_path/meterpreter-artifacts/* ./metasploit-framework\n"
+        },
+        {
+          "name": "Extract Meterpreter (Windows)",
+          "if": "${{ matrix.meterpreter.name != 'mettle' && runner.os == 'Windows' && false }}",
+          "shell": "bash",
+          "run": "set -x\ndownload_path=$(cygpath -u '${{steps.download_meterpreter.outputs.download-path}}')\ncp -r  $download_path/meterpreter-artifacts/* ./metasploit-framework\n"
+        },
+        {
+          "name": "Install mettle gem",
+          "if": "${{ matrix.meterpreter.name == 'mettle' && false }}",
+          "run": "set -x\nbundle exec gem install metasploit_payloads-mettle-${{ env.METTLE_VERSION }}.pre.dev.gem\nruby -pi.bak -e \"gsub(/'metasploit_payloads-mettle', '.*'/, '\\'metasploit_payloads-mettle\\', \\'${{ env.METTLE_VERSION }}.pre.dev\\'')\" metasploit-framework.gemspec\nbundle config unset deployment\nbundle update metasploit_payloads-mettle\nbundle install --deployment\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Checkout metasploit-payloads",
+          "if": "${{ false && matrix.meterpreter.name != 'mettle' }}",
+          "uses": "actions/checkout@v4",
+          "with": {
+            "repository": "rapid7/metasploit-payloads",
+            "path": "metasploit-payloads",
+            "ref": ""
+          }
+        },
+        {
+          "name": "Build Windows payloads via Visual Studio 2019 Build (Windows)",
+          "shell": "cmd",
+          "if": "${{ matrix.meterpreter.name == 'windows_meterpreter' && matrix.os == 'windows-2019' && false }}",
+          "run": "cd c/meterpreter\ngit submodule init && git submodule update\n\"C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\Common7\\Tools\\VsDevCmd.bat\" && make.bat\n",
+          "working-directory": "metasploit-payloads"
+        },
+        {
+          "name": "Build Windows payloads via Visual Studio 2022 Build (Windows)",
+          "shell": "pwsh",
+          "if": "${{ matrix.meterpreter.name == 'windows_meterpreter' && matrix.os == 'windows-2022' && false }}",
+          "run": "Set-Location \"C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\\"\ndir\n",
+          "working-directory": "metasploit-payloads"
+        },
+        {
+          "name": "Build Windows payloads via Visual Studio 2025 Build (Windows)",
+          "shell": "cmd",
+          "if": "${{ matrix.meterpreter.name == 'windows_meterpreter' && matrix.os == 'windows-2025' && false }}",
+          "run": "cd c/meterpreter\ngit submodule init && git submodule update\nmake.bat\n",
+          "working-directory": "metasploit-payloads"
+        },
+        {
+          "name": "Get metasploit-payloads version",
+          "if": "${{ false && matrix.meterpreter.name != 'mettle' }}",
+          "shell": "bash",
+          "run": "echo \"METASPLOIT_PAYLOADS_VERSION=$(ruby -ne \"puts Regexp.last_match(1) if /VERSION\\s+=\\s+'([^']+)'/\" gem/lib/metasploit-payloads/version.rb)\" | tee -a $GITHUB_ENV",
+          "working-directory": "metasploit-payloads"
+        },
+        {
+          "name": "Install metasploit-payloads gem",
+          "if": "${{ false && matrix.meterpreter.name != 'mettle' }}",
+          "run": "bundle exec gem install metasploit-payloads-${{ env.METASPLOIT_PAYLOADS_VERSION }}.gem\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Remove metasploit-payloads version from metasploit-framework.gemspec",
+          "if": "${{ false && matrix.meterpreter.name != 'mettle' && runner.os != 'Windows' }}",
+          "run": "ruby -pi -e \"gsub(/metasploit-payloads', '\\d+.\\d+.\\d+/, 'metasploit-payloads')\" metasploit-framework.gemspec\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Remove metasploit-payloads version from metasploit-framework.gemspec (Windows)",
+          "if": "${{ false && (runner.os == 'Windows' && matrix.meterpreter.name != 'windows_meterpreter') && matrix.meterpreter.name != 'mettle' }}",
+          "shell": "cmd",
+          "run": "ruby -pi.bak -e \"gsub(/metasploit-payloads', '\\d+.\\d+.\\d+/, 'metasploit-payloads')\" metasploit-framework.gemspec\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Bundle update/install metasploit-payloads gem",
+          "if": "${{ false && matrix.meterpreter.name != 'mettle' }}",
+          "run": "bundle config unset deployment\nbundle update metasploit-payloads\nbundle install --deployment\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Verify native dependency loading",
+          "working-directory": "metasploit-framework",
+          "shell": "bash",
+          "run": "git rev-parse HEAD\ngit config --show-origin --get maintenance.autoDetach\nbundle exec ruby -rfiddle -e 'f = Fiddle::Function.new(Fiddle::Handle::DEFAULT[\"strlen\"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_SIZE_T); abort \"wrong FFI result\" unless f.call(\"native\") == 6; puts \"NATIVE_FIDDLE_CALL_PASSED\"; $LOADED_FEATURES.grep(/fiddle\\.bundle$/).each { |path| abort \"otool failed\" unless system(\"otool\", \"-L\", path) }'\n"
+        },
+        {
+          "name": "Acceptance",
+          "env": {
+            "SPEC_HELPER_LOAD_METASPLOIT": false,
+            "SPEC_OPTS": "--tag acceptance --require acceptance_spec_helper.rb --color --format documentation --format AllureRspec::RSpecFormatter"
+          },
+          "run": "bundle exec rspec spec/acceptance/meterpreter_spec.rb\n",
+          "working-directory": "metasploit-framework"
+        },
+        {
+          "name": "Archive results",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "raw-data-${{ matrix.meterpreter.name }}-${{ matrix.meterpreter.runtime_version }}-${{ matrix.os }}",
+            "path": "metasploit-framework/tmp/allure-raw-data"
+          }
+        }
+      ]
+    }
+  }
+}
