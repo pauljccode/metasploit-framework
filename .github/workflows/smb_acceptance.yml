@@ -44,3 +44,5 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/shared_smb_acceptance.yml
+    with:
+      metasploit_framework_commit: ${{ github.sha }}

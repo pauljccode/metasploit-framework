@@ -174,9 +174,16 @@ jobs:
         if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
         uses: actions/checkout@v4
         with:
-          repository: rapid7/mettle
+          repository: pauljccode/mettle
           path: mettle
           ref: ${{ inputs.mettle_commit }}
+
+      - name: Verify Mettle source revision
+        if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
+        working-directory: mettle
+        env:
+          EXPECTED_COMMIT: ${{ inputs.mettle_commit }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
 
       - name: Get mettle version
         if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
@@ -207,9 +214,14 @@ jobs:
       - name: Checkout metasploit-framework commit
         uses: actions/checkout@v4
         with:
-          repository: rapid7/metasploit-framework
+          repository: ${{ github.repository }}
           path: metasploit-framework
           ref: ${{ inputs.metasploit_framework_commit }}
+
+      - name: Verify Framework source revision
+        shell: bash
+        working-directory: metasploit-framework
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       # https://github.com/orgs/community/discussions/26952
       - name: Support longpaths when running on Windows
@@ -277,6 +289,23 @@ jobs:
           bundle update metasploit_payloads-mettle
           bundle install --deployment
         working-directory: metasploit-framework
+
+      - name: Verify installed Mettle payloads
+        if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
+        working-directory: metasploit-framework
+        run: |
+          bundle exec ruby -rdigest -e '
+            spec = Gem.loaded_specs.fetch("metasploit_payloads-mettle")
+            abort "Unexpected Mettle version: #{spec.version}" unless spec.version.to_s == "#{ENV.fetch("METTLE_VERSION")}.pre.dev"
+            files = Dir["../mettle/build/*/bin/*"].select { |file| File.file?(file) && !file.start_with?("../mettle/build/tools/") }
+            abort "No built Mettle payloads" if files.empty?
+            files.each do |file|
+              installed = File.join(spec.full_gem_path, file.delete_prefix("../mettle/"))
+              digest = Digest::SHA256.file(file).hexdigest
+              abort "Installed payload differs: #{installed}" unless Digest::SHA256.file(installed).hexdigest == digest
+              puts "VERIFIED_METTLE_PAYLOAD #{digest} #{installed}"
+            end
+          '
 
       - name: Checkout metasploit-payloads
         if: ${{ inputs.build_metasploit_payloads && matrix.meterpreter.name != 'mettle' }}
@@ -395,7 +424,7 @@ jobs:
         uses: actions/checkout@v4
         if: always()
         with:
-          repository: rapid7/metasploit-framework
+          repository: ${{ github.repository }}
           ref: ${{ inputs.metasploit_framework_commit }}
 
       - name: Install system dependencies (Linux)
