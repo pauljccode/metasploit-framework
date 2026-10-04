@@ -407,14 +407,15 @@ jobs:
           PHP_CANDIDATE_SHA256: 680a55f80cb41621aa668f8fa8c18abf7ab62795648de413a4125cebff65455a
         run: |
           test "$(git -C ../php-transport-candidate rev-parse HEAD)" = "$PHP_CANDIDATE_COMMIT"
-          bundle exec ruby -Ilib -rmsf/base/config -rmetasploit-payloads -rfileutils -rdigest -e '
-            source = "../php-transport-candidate/php/meterpreter/meterpreter.php"
+          bundle exec ruby -Ilib -rmsf/base/config -rmetasploit-payloads -rfileutils -rdigest -ropen3 -e '
+            source, errors, result = Open3.capture3("git", "-C", "../php-transport-candidate", "show", "HEAD:php/meterpreter/meterpreter.php", binmode: true)
+            abort "Could not read PHP source: #{errors}" unless result.success?
             expected = ENV.fetch("PHP_CANDIDATE_SHA256")
-            abort "Unexpected PHP source digest" unless Digest::SHA256.file(source).hexdigest == expected
+            abort "Unexpected PHP source digest" unless Digest::SHA256.hexdigest(source) == expected
             destination = File.join(Msf::Config.data_directory, "meterpreter", "meterpreter.php")
             abort "PHP override already exists" if File.exist?(destination)
             FileUtils.mkdir_p(File.dirname(destination))
-            FileUtils.cp(source, destination)
+            File.binwrite(destination, source)
             resolved = MetasploitPayloads.path("meterpreter", "meterpreter.php")
             abort "PHP override was not selected" unless File.realpath(resolved) == File.realpath(destination)
             loaded = MetasploitPayloads.read("meterpreter", "meterpreter.php")
