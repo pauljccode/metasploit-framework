@@ -64,6 +64,6 @@ jobs:
     with:
       metasploit_payloads_commit: ${{ github.event.inputs.metasploit_payloads_commit }}
       metasploit_framework_commit: ${{ github.sha }}
-      mettle_commit: 837ab20a708256e4b1d8cba6523324c899619130
+      mettle_commit: 6af93adc00b4369b9b374a824c8d7057a2fdf491
       build_metasploit_payloads: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-branch') }}
       build_mettle: true

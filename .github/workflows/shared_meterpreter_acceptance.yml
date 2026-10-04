@@ -390,6 +390,38 @@ jobs:
           bundle install --deployment
         working-directory: metasploit-framework
 
+      - name: Checkout PHP transport candidate
+        if: matrix.meterpreter.name == 'php'
+        uses: actions/checkout@v4
+        with:
+          repository: pauljccode/metasploit-payloads
+          path: php-transport-candidate
+          ref: 9642e5d8df0cb1caae22959d29235c1ebcc5ca8a
+
+      - name: Verify and stage PHP transport candidate
+        if: matrix.meterpreter.name == 'php'
+        shell: bash
+        working-directory: metasploit-framework
+        env:
+          PHP_CANDIDATE_COMMIT: 9642e5d8df0cb1caae22959d29235c1ebcc5ca8a
+          PHP_CANDIDATE_SHA256: 680a55f80cb41621aa668f8fa8c18abf7ab62795648de413a4125cebff65455a
+        run: |
+          test "$(git -C ../php-transport-candidate rev-parse HEAD)" = "$PHP_CANDIDATE_COMMIT"
+          bundle exec ruby -Ilib -rmsf/base/config -rmetasploit-payloads -rfileutils -rdigest -e '
+            source = "../php-transport-candidate/php/meterpreter/meterpreter.php"
+            expected = ENV.fetch("PHP_CANDIDATE_SHA256")
+            abort "Unexpected PHP source digest" unless Digest::SHA256.file(source).hexdigest == expected
+            destination = File.join(Msf::Config.data_directory, "meterpreter", "meterpreter.php")
+            abort "PHP override already exists" if File.exist?(destination)
+            FileUtils.mkdir_p(File.dirname(destination))
+            FileUtils.cp(source, destination)
+            resolved = MetasploitPayloads.path("meterpreter", "meterpreter.php")
+            abort "PHP override was not selected" unless File.realpath(resolved) == File.realpath(destination)
+            loaded = MetasploitPayloads.read("meterpreter", "meterpreter.php")
+            abort "Loaded PHP source differs" unless Digest::SHA256.hexdigest(loaded) == expected
+            puts "VERIFIED_PHP_SOURCE #{expected} #{resolved}"
+          '
+
       - name: Acceptance
         env:
           SPEC_HELPER_LOAD_METASPLOIT: false
