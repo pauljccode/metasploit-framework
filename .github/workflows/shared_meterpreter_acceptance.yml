@@ -70,41 +70,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-15-intel
-          - windows-2022
-          - ubuntu-latest
-        ruby:
-          - '3.4'
-        meterpreter:
-          # Python
-          - { name: python, runtime_version: 3.8 }
-          - { name: python, runtime_version: 3.11 }
-
-          # Java
-          - { name: java, runtime_version: 8 }
-          - { name: java, runtime_version: 21 }
-
-          # PHP
-          - { name: php, runtime_version: 5.3 }
-          - { name: php, runtime_version: 7.4 }
-          - { name: php, runtime_version: 8.3 }
-        exclude:
-          # PHP 7.4/8.3 cannot be provisioned on Intel macOS: Homebrew no longer ships Intel-macOS
-          # bottles, so setup-php builds from source and hits its no-output watchdog. Meterpreter has
-          # no macOS arm64 support, so there is no viable macOS host+install path -- PHP coverage is
-          # retained on Linux/Windows (php is interpreter-level, same payload path).
-          - { os: macos-15-intel, meterpreter: { name: php, runtime_version: 7.4 } }
-          - { os: macos-15-intel, meterpreter: { name: php, runtime_version: 8.3 } }
         include:
-          # Windows Meterpreter
-          - { meterpreter: { name: windows_meterpreter }, ruby: '3.4', os: windows-2022 }
-          # TODO: Screenshotting behavior fails:
-          # - { meterpreter: { name: windows_meterpreter }, ruby: '3.4', os: windows-2025 }
-
-          # Mettle
-          - { meterpreter: { name: mettle }, os: macos-15-intel }
-          - { meterpreter: { name: mettle }, os: ubuntu-latest }
+          # Preserve the original Mettle rows: Ruby comes from Framework .ruby-version.
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: macos-15-intel }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest }
 
     runs-on: ${{ matrix.os }}
 
@@ -365,6 +334,41 @@ jobs:
           bundle update metasploit-payloads
           bundle install --deployment
         working-directory: metasploit-framework
+
+      - name: Record installed Mettle files
+        if: ${{ inputs.build_mettle }}
+        env:
+          EXPECTED_METTLE_SHA: ${{ inputs.mettle_commit }}
+        run: |
+          set -eu
+          git -C ../mettle rev-parse HEAD > ../mettle/source-sha.txt
+          test "$(cat ../mettle/source-sha.txt)" = "$EXPECTED_METTLE_SHA"
+          bundle exec ruby -rjson -rdigest - <<'RUBY'
+          spec = Gem.loaded_specs.fetch('metasploit_payloads-mettle')
+          expected_version = "#{ENV.fetch('METTLE_VERSION')}.pre.dev"
+          raise Gem::LoadError, "Unexpected Mettle version: #{spec.version}" unless spec.version.to_s == expected_version
+
+          files = Dir.glob('**/*', File::FNM_DOTMATCH, base: spec.full_gem_path).sort.select do |path|
+            File.file?(File.join(spec.full_gem_path, path))
+          end
+          raise IOError, 'Installed Mettle gem has no compiled binaries' unless files.any? { |path| path.start_with?('build/') }
+
+          hashes = files.to_h { |path| [path, Digest::SHA256.file(File.join(spec.full_gem_path, path)).hexdigest] }
+          receipt = { name: spec.name, version: spec.version.to_s, path: spec.full_gem_path, sha256: hashes }
+          File.write('../mettle/installed-mettle.json', JSON.pretty_generate(receipt))
+          RUBY
+        working-directory: metasploit-framework
+
+      - name: Preserve Mettle package and installation evidence
+        if: ${{ inputs.build_mettle }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mettle-package-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            mettle/pkg/*.gem
+            mettle/source-sha.txt
+            mettle/installed-mettle.json
 
       - name: Acceptance
         env:

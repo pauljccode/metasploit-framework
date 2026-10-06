@@ -1,17 +1,10 @@
-name: Pinned contribution acceptance
+name: Mettle package evidence and acceptance
 
 on:
   workflow_dispatch:
     inputs:
-      component:
-        description: Component to build from source
-        type: choice
-        options:
-          - payloads
-          - mettle
-        required: true
       source_commit:
-        description: Full contribution commit SHA
+        description: Full Mettle contribution commit SHA
         type: string
         required: true
 
@@ -24,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.component == 'mettle' && 'rapid7/mettle' || 'rapid7/metasploit-payloads' }}
+          repository: rapid7/mettle
           ref: ${{ inputs.source_commit }}
       - name: Verify source commit
         env:
@@ -33,10 +26,8 @@ jobs:
 
   build:
     needs: provenance
-    uses: rapid7/metasploit-framework/.github/workflows/shared_meterpreter_acceptance.yml@75193f4c81e2255f39054b36749dd8bc69282d15
+    uses: ./.github/workflows/shared_meterpreter_acceptance.yml
     with:
       metasploit_framework_commit: 75193f4c81e2255f39054b36749dd8bc69282d15
-      build_mettle: ${{ inputs.component == 'mettle' }}
-      build_metasploit_payloads: ${{ inputs.component == 'payloads' }}
-      mettle_commit: ${{ inputs.component == 'mettle' && inputs.source_commit || '' }}
-      metasploit_payloads_commit: ${{ inputs.component == 'payloads' && inputs.source_commit || '' }}
+      build_mettle: true
+      mettle_commit: ${{ inputs.source_commit }}
