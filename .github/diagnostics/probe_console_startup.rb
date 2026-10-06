@@ -51,7 +51,8 @@ module ConsoleStartupProbe
           end
           tail << event
           tail = tail.byteslice(-32_768, 32_768) if tail.bytesize > 32_768
-          next unless tail.match?(/msf\d* >\s/)
+          # Use the same prompt pattern as Acceptance::Console.prompt.
+          next unless tail.match?(/msf.*>\s+/)
 
           result[:prompt_seconds] = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
           input.write("exit -y\n")

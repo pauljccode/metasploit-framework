@@ -24,6 +24,11 @@ class ConsoleStartupProbeTest < Minitest::Test
     assert_equal 7, result[:exit_status]
   end
 
+  def test_accepts_console_prompt_with_terminal_formatting
+    result = probe('$stdout.sync = true; print "\e[4mmsf\e[0m6 > "; exit(STDIN.gets == "exit -y\n" ? 0 : 1)')
+    assert_equal 'passed', result[:status]
+  end
+
   def test_timeout_terminates_and_reaps_process
     result = probe('sleep 60', deadline: 0.2)
     assert_equal 'startup_timeout', result[:status]
