@@ -4,6 +4,7 @@ require 'json'
 require 'open3'
 require 'fileutils'
 require 'rbconfig'
+require 'tmpdir'
 
 # Bounds console startup and preserves output without retrying a failed trial.
 module ConsoleStartupProbe
@@ -88,13 +89,25 @@ module ConsoleStartupProbe
 end
 
 if $PROGRAM_NAME == __FILE__
+  mode = ENV.fetch('STARTUP_MODE', 'warm_reuse')
+  raise ArgumentError, "Unknown startup mode: #{mode}" unless %w[warm_reuse cold_profiles].include?(mode)
+
   output = File.expand_path(ARGV.fetch(0))
   FileUtils.mkdir_p(output)
   observer = File.expand_path('startup_observer.rb', __dir__)
   # Match the acceptance console command; the observer only adds thread dumps.
   command = ['bundle', 'exec', 'ruby', '-r', observer, 'msfconsole', '--no-readline', '--quiet']
-  results = 3.times.map do |index|
-    result = ConsoleStartupProbe.run(command, output: File.join(output, "console-#{index}.log"))
+  trials = mode == 'cold_profiles' ? 6 : 3
+  results = trials.times.map do |index|
+    log = File.join(output, "console-#{index}.log")
+    result = if mode == 'cold_profiles'
+               Dir.mktmpdir('msf-startup-') do |config|
+                 ConsoleStartupProbe.run(command, output: log, env: { 'MSF_CFGROOT_CONFIG' => config })
+               end
+             else
+               ConsoleStartupProbe.run(command, output: log)
+             end
+    result[:mode] = mode
     puts JSON.generate(result)
     File.write(File.join(output, "trial-#{index}.json"), JSON.pretty_generate(result))
     result

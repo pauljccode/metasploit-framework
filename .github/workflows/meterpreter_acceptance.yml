@@ -2,6 +2,11 @@ name: Windows console startup diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      startup_mode:
+        type: choice
+        options: [warm_reuse, cold_profiles]
+        default: warm_reuse
 
 permissions:
   contents: read
@@ -13,11 +18,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cache: ['5', '6-java-8']
+        cache: ${{ inputs.startup_mode == 'cold_profiles' && fromJSON('["5"]') || fromJSON('["5", "6-java-8"]') }}
     env:
       RAILS_ENV: test
       BUNDLE_WITHOUT: coverage development
       NOKOGIRI_USE_MIRRORED_GNU_SOURCE: t
+      STARTUP_MODE: ${{ inputs.startup_mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,7 +66,7 @@ jobs:
       - name: Check diagnostic process handling on Windows
         run: bundle exec ruby ../diagnostic-tools/.github/diagnostics/test_console_startup_probe.rb
         working-directory: metasploit-framework
-      - name: Observe three console starts
+      - name: Observe console starts
         run: bundle exec ruby ../diagnostic-tools/.github/diagnostics/probe_console_startup.rb ../startup-results
         working-directory: metasploit-framework
       - uses: actions/upload-artifact@v4
