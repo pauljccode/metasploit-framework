@@ -1,68 +1,70 @@
-name: Meterpreter Acceptance
-
-# Optional, enabling concurrency limits: https://docs.github.com/en/actions/using-jobs/using-concurrency
-#concurrency:
-#  group: ${{ github.ref }}-${{ github.workflow }}
-#  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
-permissions:
-  actions: none
-  checks: none
-  contents: none
-  deployments: none
-  id-token: none
-  issues: none
-  discussions: none
-  packages: none
-  pages: none
-  pull-requests: none
-  repository-projects: none
-  security-events: none
-  statuses: none
+name: Windows console startup diagnostic
 
 on:
   workflow_dispatch:
-    inputs:
-      metasploit_payloads_commit:
-        description: 'metasploit-payloads branch you want to test'
-        required: true
-        default: 'master'
-      mettle_commit:
-        description: 'mettle branch you want to test'
-        required: true
-        default: 'master'
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-  pull_request:
-    branches:
-      - '*'
-    paths:
-      - 'metasploit-framework.gemspec'
-      - 'Gemfile.lock'
-      - 'data/templates/**'
-      - 'modules/payloads/**'
-      - 'lib/msf/base/sessions/**'
-      - 'lib/msf/core/payload/**'
-      - 'lib/msf/core/**'
-      - 'lib/rex/post/**'
-      - 'test/modules/**'
-      - 'tools/dev/**'
-      - 'spec/acceptance/**'
-      - 'spec/support/acceptance/**'
-      - 'spec/acceptance_spec_helper.rb'
-      - '.github/**'
-#   Example of running as a cron, to weed out flaky tests
-#  schedule:
-#    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    uses: ./.github/workflows/shared_meterpreter_acceptance.yml
-    with:
-      metasploit_payloads_commit: ${{ github.event.inputs.metasploit_payloads_commit }}
-      mettle_commit: ${{ github.event.inputs.mettle_commit }}
-      build_metasploit_payloads: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-branch') }}
-      build_mettle: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-mettle-branch') }}
+  startup:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: ['5', '6-java-8']
+    env:
+      RAILS_ENV: test
+      BUNDLE_WITHOUT: coverage development
+      NOKOGIRI_USE_MIRRORED_GNU_SOURCE: t
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: diagnostic-tools
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+      - name: Install system dependencies (Windows)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # pcap dependencies
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest -Uri 'https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip' -OutFile 'C:\Windows\Temp\WpdPack_4_1_2.zip' -SkipCertificateCheck
+          $expected = 'ea799cf2f26e4afb1892938070fd2b1ca37ce5cf75fec4349247df12b784edbd'
+          $actual = (Get-FileHash 'C:\Windows\Temp\WpdPack_4_1_2.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "WpdPack_4_1_2.zip SHA256 mismatch: expected $expected, got $actual" }
+
+          choco install 7zip -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install 7zip failed with exit code $LASTEXITCODE" }
+
+          7z x "C:\Windows\Temp\WpdPack_4_1_2.zip" -o"C:\"
+          if ($LASTEXITCODE -ne 0) { throw "7z extraction failed with exit code $LASTEXITCODE" }
+
+      - name: Checkout the source from the failed job
+        uses: actions/checkout@v4
+        with:
+          repository: rapid7/metasploit-framework
+          ref: a6e8091aae76b91302704cb27050113ede98aa2d
+          path: metasploit-framework
+      - name: Complete Git maintenance before Bundler
+        run: git config --global maintenance.autoDetach false
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8
+        with:
+          ruby-version: '3.4.11'
+          bundler-cache: true
+          cache-version: ${{ matrix.cache }}
+          working-directory: metasploit-framework
+      - name: Check diagnostic process handling on Windows
+        run: bundle exec ruby ../diagnostic-tools/.github/diagnostics/test_console_startup_probe.rb
+        working-directory: metasploit-framework
+      - name: Observe three console starts
+        run: bundle exec ruby ../diagnostic-tools/.github/diagnostics/probe_console_startup.rb ../startup-results
+        working-directory: metasploit-framework
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-startup-cache-${{ matrix.cache }}
+          path: startup-results
