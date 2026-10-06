@@ -1,68 +1,42 @@
-name: Meterpreter Acceptance
-
-# Optional, enabling concurrency limits: https://docs.github.com/en/actions/using-jobs/using-concurrency
-#concurrency:
-#  group: ${{ github.ref }}-${{ github.workflow }}
-#  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
-permissions:
-  actions: none
-  checks: none
-  contents: none
-  deployments: none
-  id-token: none
-  issues: none
-  discussions: none
-  packages: none
-  pages: none
-  pull-requests: none
-  repository-projects: none
-  security-events: none
-  statuses: none
+name: Pinned contribution acceptance
 
 on:
   workflow_dispatch:
     inputs:
-      metasploit_payloads_commit:
-        description: 'metasploit-payloads branch you want to test'
+      component:
+        description: Component to build from source
+        type: choice
+        options:
+          - payloads
+          - mettle
         required: true
-        default: 'master'
-      mettle_commit:
-        description: 'mettle branch you want to test'
+      source_commit:
+        description: Full contribution commit SHA
+        type: string
         required: true
-        default: 'master'
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-  pull_request:
-    branches:
-      - '*'
-    paths:
-      - 'metasploit-framework.gemspec'
-      - 'Gemfile.lock'
-      - 'data/templates/**'
-      - 'modules/payloads/**'
-      - 'lib/msf/base/sessions/**'
-      - 'lib/msf/core/payload/**'
-      - 'lib/msf/core/**'
-      - 'lib/rex/post/**'
-      - 'test/modules/**'
-      - 'tools/dev/**'
-      - 'spec/acceptance/**'
-      - 'spec/support/acceptance/**'
-      - 'spec/acceptance_spec_helper.rb'
-      - '.github/**'
-#   Example of running as a cron, to weed out flaky tests
-#  schedule:
-#    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
 
 jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.component == 'mettle' && 'rapid7/mettle' || 'rapid7/metasploit-payloads' }}
+          ref: ${{ inputs.source_commit }}
+      - name: Verify source commit
+        env:
+          EXPECTED_SHA: ${{ inputs.source_commit }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
   build:
-    uses: ./.github/workflows/shared_meterpreter_acceptance.yml
+    needs: provenance
+    uses: rapid7/metasploit-framework/.github/workflows/shared_meterpreter_acceptance.yml@75193f4c81e2255f39054b36749dd8bc69282d15
     with:
-      metasploit_payloads_commit: ${{ github.event.inputs.metasploit_payloads_commit }}
-      mettle_commit: ${{ github.event.inputs.mettle_commit }}
-      build_metasploit_payloads: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-branch') }}
-      build_mettle: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-mettle-branch') }}
+      metasploit_framework_commit: 75193f4c81e2255f39054b36749dd8bc69282d15
+      build_mettle: ${{ inputs.component == 'mettle' }}
+      build_metasploit_payloads: ${{ inputs.component == 'payloads' }}
+      mettle_commit: ${{ inputs.component == 'mettle' && inputs.source_commit || '' }}
+      metasploit_payloads_commit: ${{ inputs.component == 'payloads' && inputs.source_commit || '' }}
