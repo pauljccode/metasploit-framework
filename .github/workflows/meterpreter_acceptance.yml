@@ -1,68 +1,24 @@
-name: Meterpreter Acceptance
-
-# Optional, enabling concurrency limits: https://docs.github.com/en/actions/using-jobs/using-concurrency
-#concurrency:
-#  group: ${{ github.ref }}-${{ github.workflow }}
-#  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
-permissions:
-  actions: none
-  checks: none
-  contents: none
-  deployments: none
-  id-token: none
-  issues: none
-  discussions: none
-  packages: none
-  pages: none
-  pull-requests: none
-  repository-projects: none
-  security-events: none
-  statuses: none
-
+name: Windows gem platform diagnostic
 on:
   workflow_dispatch:
-    inputs:
-      metasploit_payloads_commit:
-        description: 'metasploit-payloads branch you want to test'
-        required: true
-        default: 'master'
-      mettle_commit:
-        description: 'mettle branch you want to test'
-        required: true
-        default: 'master'
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-  pull_request:
-    branches:
-      - '*'
-    paths:
-      - 'metasploit-framework.gemspec'
-      - 'Gemfile.lock'
-      - 'data/templates/**'
-      - 'modules/payloads/**'
-      - 'lib/msf/base/sessions/**'
-      - 'lib/msf/core/payload/**'
-      - 'lib/msf/core/**'
-      - 'lib/rex/post/**'
-      - 'test/modules/**'
-      - 'tools/dev/**'
-      - 'spec/acceptance/**'
-      - 'spec/support/acceptance/**'
-      - 'spec/acceptance_spec_helper.rb'
-      - '.github/**'
-#   Example of running as a cron, to weed out flaky tests
-#  schedule:
-#    - cron: '*/15 * * * *'
-
+permissions:
+  contents: read
 jobs:
-  build:
-    uses: ./.github/workflows/shared_meterpreter_acceptance.yml
-    with:
-      metasploit_payloads_commit: ${{ github.event.inputs.metasploit_payloads_commit }}
-      mettle_commit: ${{ github.event.inputs.mettle_commit }}
-      build_metasploit_payloads: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-branch') }}
-      build_mettle: ${{ contains(github.event.pull_request.labels.*.name, 'payload-testing-mettle-branch') }}
+  platform-selection:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8
+        with:
+          ruby-version: '3.4'
+          bundler: '2.5.22'
+          bundler-cache: false
+      - name: Check native gem selection before and after update
+        run: ruby .github/diagnostics/windows_gem_platform.rb
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-gem-platform-evidence
+          path: .github/diagnostics/bundler-platform-*/
+          if-no-files-found: error
