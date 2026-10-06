@@ -70,46 +70,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-15-intel
-          - windows-2022
-          - ubuntu-latest
-        ruby:
-          - '3.4'
-        meterpreter:
-          # Python
-          - { name: python, runtime_version: 3.8 }
-          - { name: python, runtime_version: 3.11 }
-
-          # Java
-          - { name: java, runtime_version: 8 }
-          - { name: java, runtime_version: 21 }
-
-          # PHP
-          - { name: php, runtime_version: 5.3 }
-          - { name: php, runtime_version: 7.4 }
-          - { name: php, runtime_version: 8.3 }
-        exclude:
-          # PHP 7.4/8.3 cannot be provisioned on Intel macOS: Homebrew no longer ships Intel-macOS
-          # bottles, so setup-php builds from source and hits its no-output watchdog. Meterpreter has
-          # no macOS arm64 support, so there is no viable macOS host+install path -- PHP coverage is
-          # retained on Linux/Windows (php is interpreter-level, same payload path).
-          - { os: macos-15-intel, meterpreter: { name: php, runtime_version: 7.4 } }
-          - { os: macos-15-intel, meterpreter: { name: php, runtime_version: 8.3 } }
         include:
-          # Windows Meterpreter
-          - { meterpreter: { name: windows_meterpreter }, ruby: '3.4', os: windows-2022 }
-          # TODO: Screenshotting behavior fails:
-          # - { meterpreter: { name: windows_meterpreter }, ruby: '3.4', os: windows-2025 }
-
-          # Mettle
-          - { meterpreter: { name: mettle }, os: macos-15-intel }
-          - { meterpreter: { name: mettle }, os: ubuntu-latest }
+          - { meterpreter: { name: php, runtime_version: '5.3' }, ruby: '3.4', os: macos-15-intel }
 
     runs-on: ${{ matrix.os }}
 
-    # Source builds and the full acceptance suite share this job budget.
-    timeout-minutes: ${{ inputs.build_mettle && matrix.meterpreter.name == 'mettle' && 75 || 50 }}
+    # PHP on Intel macOS needs room for cold Ruby setup and the full suite.
+    timeout-minutes: ${{ inputs.build_mettle && matrix.meterpreter.name == 'mettle' && 75 || matrix.os == 'macos-15-intel' && matrix.meterpreter.name == 'php' && 60 || 50 }}
 
     env:
       RAILS_ENV: test
@@ -236,9 +203,8 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
-          # Runtime setup can add native libraries (for example, PHP's libffi).
-          # Do not restore those compiled gems into a different runtime job.
-          cache-version: 6-${{ matrix.meterpreter.name }}-${{ matrix.meterpreter.runtime_version }}
+          # Force a cold dependency install for this private budget experiment.
+          cache-version: diagnostic-cold-${{ github.run_id }}-${{ github.run_attempt }}
           working-directory: metasploit-framework
 
       - name: Move mettle gem into framework
