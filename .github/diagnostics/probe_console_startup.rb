@@ -7,6 +7,8 @@ require 'rbconfig'
 
 # Bounds console startup and preserves output without retrying a failed trial.
 module ConsoleStartupProbe
+  class ProbeError < StandardError; end
+
   def self.run(command, output:, deadline: 120, env: {})
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     windows = Gem.win_platform?
@@ -64,7 +66,7 @@ module ConsoleStartupProbe
         if waiter.alive?
           if windows
             terminated = system('taskkill', '/PID', waiter.pid.to_s, '/T', '/F')
-            raise RuntimeError, 'Could not terminate console process tree' unless terminated || waiter.join(1)
+            raise ProbeError, 'Could not terminate console process tree' unless terminated || waiter.join(1)
           else
             begin
               Process.kill('KILL', -waiter.pid)
@@ -73,10 +75,10 @@ module ConsoleStartupProbe
             end
           end
         end
-        raise RuntimeError, 'Console process did not exit after termination' unless waiter.join(10)
+        raise ProbeError, 'Console process did not exit after termination' unless waiter.join(10)
 
         input.close unless input.closed?
-        raise RuntimeError, 'Console output reader did not finish' unless reader.join(10)
+        raise ProbeError, 'Console output reader did not finish' unless reader.join(10)
       end
       result[:exit_status] = waiter.value.exitstatus
     end
