@@ -1,10 +1,11 @@
-name: Mettle package evidence and acceptance
+name: Mettle natural notification diagnostics
 
 on:
   workflow_dispatch:
     inputs:
       source_commit:
-        description: Full Mettle contribution commit SHA
+        description: Pinned baseline source for matched diagnostics
+        default: 4dd76aed028fff0a214564cb4c389947b71a194b
         type: string
         required: true
 

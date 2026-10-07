@@ -71,9 +71,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Preserve the original Mettle rows: Ruby comes from Framework .ruby-version.
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: macos-15-intel }
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest, variant: baseline }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest, variant: candidate }
 
     runs-on: ${{ matrix.os }}
 
@@ -87,7 +86,7 @@ jobs:
       SESSION_RUNTIME_VERSION: ${{ matrix.meterpreter.runtime_version }}
       BUNDLE_WITHOUT: "coverage development"
 
-    name: ${{ matrix.meterpreter.name }} ${{ matrix.meterpreter.runtime_version }} ${{ matrix.os }}
+    name: Mettle diagnostic ${{ matrix.variant }} ${{ matrix.os }}
     steps:
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -151,6 +150,20 @@ jobs:
           repository: rapid7/mettle
           path: mettle
           ref: ${{ inputs.mettle_commit }}
+
+      - name: Checkout diagnostic harness
+        uses: actions/checkout@v4
+        with:
+          path: diagnostic-harness
+
+      - name: Instrument the pinned source
+        env:
+          VARIANT: ${{ matrix.variant }}
+          EXPECTED_SHA: ${{ inputs.mettle_commit }}
+        run: |
+          test "$(git -C mettle rev-parse HEAD)" = "$EXPECTED_SHA"
+          python3 diagnostic-harness/tools/dev/private_eio/instrument.py mettle "$VARIANT"
+          git -C mettle diff -- mettle/src/mettle.c > mettle/diagnostic-source.patch
 
       - name: Get mettle version
         if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
@@ -353,6 +366,11 @@ jobs:
           end
           raise IOError, 'Installed Mettle gem has no compiled binaries' unless files.any? { |path| path.start_with?('build/') }
 
+          %w[mettle mettle.bin].each do |name|
+            binary = File.join(spec.full_gem_path, 'build/x86_64-linux-musl/bin', name)
+            raise IOError, "Missing diagnostics in #{binary}" unless File.binread(binary).include?('EIO_DIAGNOSTIC_V1')
+          end
+
           hashes = files.to_h { |path| [path, Digest::SHA256.file(File.join(spec.full_gem_path, path)).hexdigest] }
           receipt = { name: spec.name, version: spec.version.to_s, path: spec.full_gem_path, sha256: hashes }
           File.write('../mettle/installed-mettle.json', JSON.pretty_generate(receipt))
@@ -363,12 +381,14 @@ jobs:
         if: ${{ inputs.build_mettle }}
         uses: actions/upload-artifact@v4
         with:
-          name: mettle-package-${{ matrix.os }}
+          name: mettle-package-${{ matrix.variant }}-${{ matrix.os }}
           if-no-files-found: error
           path: |
             mettle/pkg/*.gem
             mettle/source-sha.txt
             mettle/installed-mettle.json
+            mettle/diagnostic-source.json
+            mettle/diagnostic-source.patch
 
       - name: Acceptance
         env:
@@ -382,15 +402,15 @@ jobs:
         # Note: rspec retry is intentionally not used, as it can cause issues with allure's reporting
         # Additionally - flakey tests should be fixed or marked as flakey instead of silently retried
         run: |
-          bundle exec rspec spec/acceptance/meterpreter_spec.rb
+          bundle exec rspec spec/acceptance/meterpreter_spec.rb --seed 16218
         working-directory: metasploit-framework
 
       - name: Archive results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # Provide a unique artifact for each matrix os, otherwise race conditions can lead to corrupt zips
-          name: raw-data-${{ matrix.meterpreter.name }}-${{ matrix.meterpreter.runtime_version }}-${{ matrix.os }}
+          # Keep baseline and candidate artifacts separate.
+          name: raw-data-${{ matrix.variant }}-${{ matrix.os }}
           path: metasploit-framework/tmp/allure-raw-data
 
   # Generate a final report from the previous test results
