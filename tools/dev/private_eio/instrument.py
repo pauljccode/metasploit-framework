@@ -47,16 +47,16 @@ replace_once(restart, """\tdiagnostic_last_active = ev_is_active(w);
 stop = "\tev_async_stop(ev_default_loop(EV_LOOP_FLAGS), &eio_async_watcher);"
 replace_once(stop, "\t++diagnostic_done_polls;\n" + (stop if variant == "baseline" else
              "\t/* Keep the watcher active: restarting it can discard worker notifications. */"))
-replace_once('\tlog_info("Heartbeat");', """\tlog_info("Heartbeat EIO_DIAGNOSTIC_V1 requests=%u ready=%u pending=%u "
-\t\t"async_active=%d async_sent=%d idle_active=%d async_polls=%lu "
-\t\t"idle_polls=%lu done_polls=%lu notifications_cleared=%lu "
-\t\t"last_active=%d last_before=%d last_after=%d",
+replace_once('\tlog_info("Heartbeat");', """\t/* Keep each complete line within the logger's 128-byte row. */
+\tlog_info("EIO_DIAGNOSTIC_V2 q=%u/%u/%u w=%d/%d/%d",
 \t\teio_nreqs(), eio_nready(), eio_npending(),
-\t\tev_is_active(&eio_async_watcher), ev_async_pending(&eio_async_watcher),
-\t\tev_is_active(&eio_idle_watcher), diagnostic_async_polls,
-\t\tdiagnostic_idle_polls, diagnostic_done_polls,
-\t\tdiagnostic_notifications_cleared, diagnostic_last_active,
-\t\tdiagnostic_last_before, diagnostic_last_after);""")
+\t\t!!ev_is_active(&eio_async_watcher), !!ev_async_pending(&eio_async_watcher),
+\t\t!!ev_is_active(&eio_idle_watcher));
+\tlog_info("EIO2 polls=%lu/%lu/%lu", diagnostic_async_polls,
+\t\tdiagnostic_idle_polls, diagnostic_done_polls);
+\tlog_info("EIO2 lost=%lu state=%d/%d/%d",
+\t\tdiagnostic_notifications_cleared, !!diagnostic_last_active,
+\t\t!!diagnostic_last_before, !!diagnostic_last_after);""")
 path.write_text(text)
 receipt = {
     "variant": variant,

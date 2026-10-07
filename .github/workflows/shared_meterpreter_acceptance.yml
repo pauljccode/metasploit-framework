@@ -376,7 +376,7 @@ jobs:
           binaries = target == 'x86_64-apple-darwin' ? %w[mettle] : %w[mettle mettle.bin]
           binaries.each do |name|
             binary = File.join(spec.full_gem_path, 'build', target, 'bin', name)
-            raise IOError, "Missing diagnostics in #{binary}" unless File.binread(binary).include?('EIO_DIAGNOSTIC_V1')
+            raise IOError, "Missing diagnostics in #{binary}" unless File.binread(binary).include?('EIO_DIAGNOSTIC_V2')
           end
 
           hashes = files.to_h { |path| [path, Digest::SHA256.file(File.join(spec.full_gem_path, path)).hexdigest] }
