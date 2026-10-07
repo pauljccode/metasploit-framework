@@ -2,6 +2,12 @@ name: Shared Meterpreter Acceptance
 on:
   workflow_call:
     inputs:
+      diagnostic_os:
+        type: string
+        default: ubuntu-latest
+      diagnostic_seed:
+        type: string
+        default: '16218'
       # Defaults set as '' will use the current branch as their commit
       metasploit_framework_commit:
         description: "metasploit-framework commit to build with"
@@ -71,8 +77,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest, variant: baseline }
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest, variant: candidate }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: '${{ inputs.diagnostic_os }}', variant: baseline }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: '${{ inputs.diagnostic_os }}', variant: candidate }
 
     runs-on: ${{ matrix.os }}
 
@@ -366,8 +372,10 @@ jobs:
           end
           raise IOError, 'Installed Mettle gem has no compiled binaries' unless files.any? { |path| path.start_with?('build/') }
 
-          %w[mettle mettle.bin].each do |name|
-            binary = File.join(spec.full_gem_path, 'build/x86_64-linux-musl/bin', name)
+          target = ENV.fetch('RUNNER_OS') == 'macOS' ? 'x86_64-apple-darwin' : 'x86_64-linux-musl'
+          binaries = target == 'x86_64-apple-darwin' ? %w[mettle] : %w[mettle mettle.bin]
+          binaries.each do |name|
+            binary = File.join(spec.full_gem_path, 'build', target, 'bin', name)
             raise IOError, "Missing diagnostics in #{binary}" unless File.binread(binary).include?('EIO_DIAGNOSTIC_V1')
           end
 
@@ -392,6 +400,7 @@ jobs:
 
       - name: Acceptance
         env:
+          DIAGNOSTIC_SEED: ${{ inputs.diagnostic_seed }}
           SPEC_HELPER_LOAD_METASPLOIT: false
           SPEC_OPTS: "--tag acceptance --require acceptance_spec_helper.rb --color --format documentation --format AllureRspec::RSpecFormatter"
         # Unix run command:
@@ -402,7 +411,8 @@ jobs:
         # Note: rspec retry is intentionally not used, as it can cause issues with allure's reporting
         # Additionally - flakey tests should be fixed or marked as flakey instead of silently retried
         run: |
-          bundle exec rspec spec/acceptance/meterpreter_spec.rb --seed 16218
+          [[ "$DIAGNOSTIC_SEED" =~ ^[0-9]+$ ]]
+          bundle exec rspec spec/acceptance/meterpreter_spec.rb --seed "$DIAGNOSTIC_SEED"
         working-directory: metasploit-framework
 
       - name: Archive results

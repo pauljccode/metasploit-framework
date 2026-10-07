@@ -9,6 +9,20 @@ on:
         type: string
         required: true
 
+      diagnostic_os:
+        description: Runner for the matched experiment
+        type: choice
+        options:
+          - ubuntu-latest
+          - macos-15-intel
+        default: ubuntu-latest
+        required: true
+      diagnostic_seed:
+        description: RSpec seed from the failing job
+        type: string
+        default: '16218'
+        required: true
+
 permissions:
   contents: read
 
@@ -31,4 +45,6 @@ jobs:
     with:
       metasploit_framework_commit: 75193f4c81e2255f39054b36749dd8bc69282d15
       build_mettle: true
+      diagnostic_os: ${{ inputs.diagnostic_os }}
+      diagnostic_seed: ${{ inputs.diagnostic_seed }}
       mettle_commit: ${{ inputs.source_commit }}
