@@ -17,14 +17,7 @@ permissions:
   statuses: none
 
 on:
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-      - weekly-dependency-updates
-  pull_request:
-    branches-ignore:
-      - weekly-dependency-updates
+  workflow_dispatch:
 
 env:
   # gnu.org has frequent downtime, so use the mirror at nokogiri.org
@@ -61,7 +54,7 @@ jobs:
           --health-retries 5
 
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         ruby:
           - '3.2'
@@ -121,3 +114,46 @@ jobs:
           bash -c "${CMD}"
         env:
           CMD: ${{ matrix.test_cmd }}
+
+  lifetimes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:9.6
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      RAILS_ENV: test
+      BUNDLE_WITHOUT: "coverage development pcap"
+      NOKOGIRI_USE_MIRRORED_GNU_SOURCE: "t"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get install -y --no-install-recommends libpcap-dev graphviz
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      - name: Create database
+        run: |
+          cp config/database.yml.github_actions config/database.yml
+          bundle exec rake db:create db:migrate
+          git diff --exit-code db/schema.rb
+      - name: Trace original seed without retries
+        shell: bash
+        run: |
+          mkdir -p log
+          bundle exec rake spec SPEC_OPTS="--tag ~content --seed 19061 --require ./tools/diagnostics/framework-lifetimes.rb" 2>&1 | tee log/lifetime-suite.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: framework-lifetimes
+          path: log/
