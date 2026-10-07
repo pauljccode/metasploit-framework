@@ -37,6 +37,7 @@ jobs:
           bundle exec rake db:create db:migrate
           git diff --exit-code db/schema.rb
       - name: Trace original seed without retries
+        shell: bash
         run: |
           mkdir -p log
           bundle exec rake spec SPEC_OPTS="--tag ~content --seed 19061 --require ./tools/diagnostics/framework-lifetimes.rb" 2>&1 | tee log/lifetime-suite.log
