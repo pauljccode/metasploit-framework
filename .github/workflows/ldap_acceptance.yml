@@ -22,6 +22,7 @@ permissions:
   statuses: none
 
 on:
+  workflow_dispatch:
   push:
     branches-ignore:
       - gh-pages
@@ -77,6 +78,9 @@ jobs:
         run: |
           docker compose build
           docker compose up --wait -d
+
+      - name: Verify package transport and certificate rejection
+        run: bash test/ldap/verify-https.sh
 
       # https://github.com/orgs/community/discussions/26952
       - name: Support longpaths
