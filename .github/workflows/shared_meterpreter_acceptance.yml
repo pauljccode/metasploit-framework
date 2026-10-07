@@ -71,9 +71,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Preserve the original Mettle rows: Ruby comes from Framework .ruby-version.
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: macos-15-intel }
-          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest }
+          # Recheck the two failing environments with their original RSpec seeds.
+          - { meterpreter: { name: php, runtime_version: '5.3' }, ruby: '3.4', os: macos-15-intel, seed: '23339' }
+          - { meterpreter: { name: mettle, runtime_version: '' }, ruby: '', os: ubuntu-latest, seed: '51652' }
 
     runs-on: ${{ matrix.os }}
 
@@ -336,7 +336,7 @@ jobs:
         working-directory: metasploit-framework
 
       - name: Record installed Mettle files
-        if: ${{ inputs.build_mettle }}
+        if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
         env:
           EXPECTED_METTLE_SHA: ${{ inputs.mettle_commit }}
         run: |
@@ -360,7 +360,7 @@ jobs:
         working-directory: metasploit-framework
 
       - name: Preserve Mettle package and installation evidence
-        if: ${{ inputs.build_mettle }}
+        if: ${{ matrix.meterpreter.name == 'mettle' && inputs.build_mettle }}
         uses: actions/upload-artifact@v4
         with:
           name: mettle-package-${{ matrix.os }}
@@ -370,8 +370,39 @@ jobs:
             mettle/source-sha.txt
             mettle/installed-mettle.json
 
+      - name: Verify installed PHP source
+        if: ${{ matrix.meterpreter.name == 'php' }}
+        env:
+          EXPECTED_PAYLOADS_SHA: ${{ inputs.metasploit_payloads_commit }}
+        run: |
+          set -eu
+          test "$(git -C ../metasploit-payloads rev-parse HEAD)" = "$EXPECTED_PAYLOADS_SHA"
+          bundle exec ruby -rjson -rdigest -rmetasploit-payloads - <<'RUBY'
+          spec = Gem.loaded_specs.fetch('metasploit-payloads')
+          installed = File.join(spec.full_gem_path, 'data/meterpreter/meterpreter.php')
+          source = '../metasploit-payloads/php/meterpreter/meterpreter.php'
+          raise IOError, 'Unexpected PHP payload path' unless MetasploitPayloads.path('meterpreter', 'meterpreter.php') == installed
+          plaintext = MetasploitPayloads.read('meterpreter', 'meterpreter.php')
+          raise IOError, 'Installed PHP source differs from candidate' unless plaintext == File.binread(source)
+          receipt = { source_commit: ENV.fetch('EXPECTED_PAYLOADS_SHA'), version: spec.version.to_s,
+                      installed_path: installed, sha256: Digest::SHA256.file(installed).hexdigest,
+                      plaintext_sha256: Digest::SHA256.hexdigest(plaintext) }
+          File.write('installed-php.json', JSON.pretty_generate(receipt))
+          puts JSON.generate(receipt)
+          RUBY
+        working-directory: metasploit-framework
+
+      - name: Preserve PHP installation evidence
+        if: ${{ matrix.meterpreter.name == 'php' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-installation-${{ matrix.os }}
+          if-no-files-found: error
+          path: metasploit-framework/installed-php.json
+
       - name: Acceptance
         env:
+          ACCEPTANCE_SEED: ${{ matrix.seed }}
           SPEC_HELPER_LOAD_METASPLOIT: false
           SPEC_OPTS: "--tag acceptance --require acceptance_spec_helper.rb --color --format documentation --format AllureRspec::RSpecFormatter"
         # Unix run command:
@@ -382,7 +413,7 @@ jobs:
         # Note: rspec retry is intentionally not used, as it can cause issues with allure's reporting
         # Additionally - flakey tests should be fixed or marked as flakey instead of silently retried
         run: |
-          bundle exec rspec spec/acceptance/meterpreter_spec.rb
+          bundle exec rspec spec/acceptance/meterpreter_spec.rb --seed "$ACCEPTANCE_SEED"
         working-directory: metasploit-framework
 
       - name: Archive results

@@ -1,12 +1,7 @@
-name: Mettle package evidence and acceptance
+name: Modem PR payload prerequisite validation
 
 on:
   workflow_dispatch:
-    inputs:
-      source_commit:
-        description: Full Mettle contribution commit SHA
-        type: string
-        required: true
 
 permissions:
   contents: read
@@ -14,20 +9,31 @@ permissions:
 jobs:
   provenance:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - repository: rapid7/metasploit-framework
+            commit: 784c81e524e79c518eed56bf972900dbc760c64b
+          - repository: rapid7/metasploit-payloads
+            commit: 2addfcce8cfe4abf79b7098711e518fad0f42fe0
+          - repository: rapid7/mettle
+            commit: 6b0f21d3d3feb89aaaa563ec077857e90c2ddba4
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: rapid7/mettle
-          ref: ${{ inputs.source_commit }}
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.commit }}
       - name: Verify source commit
         env:
-          EXPECTED_SHA: ${{ inputs.source_commit }}
+          EXPECTED_SHA: ${{ matrix.commit }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
   build:
     needs: provenance
     uses: ./.github/workflows/shared_meterpreter_acceptance.yml
     with:
-      metasploit_framework_commit: 75193f4c81e2255f39054b36749dd8bc69282d15
+      metasploit_framework_commit: 784c81e524e79c518eed56bf972900dbc760c64b
       build_mettle: true
-      mettle_commit: ${{ inputs.source_commit }}
+      mettle_commit: 6b0f21d3d3feb89aaaa563ec077857e90c2ddba4
+      build_metasploit_payloads: true
+      metasploit_payloads_commit: 2addfcce8cfe4abf79b7098711e518fad0f42fe0
