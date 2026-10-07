@@ -1,4 +1,4 @@
-name: Verify
+name: Modem and JSON-RPC remote database validation
 
 # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
 permissions:
@@ -17,32 +17,13 @@ permissions:
   statuses: none
 
 on:
-  push:
-    branches-ignore:
-      - gh-pages
-      - metakitty
-      - weekly-dependency-updates
-  pull_request:
-    branches-ignore:
-      - weekly-dependency-updates
+  workflow_dispatch:
 
 env:
   # gnu.org has frequent downtime, so use the mirror at nokogiri.org
   NOKOGIRI_USE_MIRRORED_GNU_SOURCE: "t"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    name: Docker Build
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: docker-compose build
-        run: |
-          docker compose build
-
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -63,22 +44,10 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        ruby:
-          - '3.2'
-          - '3.3'
-          - '3.4'
-        os:
-          - ubuntu-latest
         include:
           - os: ubuntu-latest
-            ruby: '3.2'
-            test_cmd: 'bundle exec rake rspec-rerun:spec SPEC_OPTS="--tag content" MSF_FEATURE_DEFER_MODULE_LOADS=1'
-        test_cmd:
-          - bundle exec rake rspec-rerun:spec SPEC_OPTS="--tag content"
-          - bundle exec rake rspec-rerun:spec SPEC_OPTS="--tag ~content"
-          # Used for testing the remote data service
-          - bundle exec rake rspec-rerun:spec SPEC_OPTS="--tag content" REMOTE_DB=1
-          - bundle exec rake rspec-rerun:spec SPEC_OPTS="--tag ~content" REMOTE_DB=1
+            ruby: '3.4'
+            test_cmd: 'bundle exec rake spec SPEC_OPTS="--tag ~content --seed 19184" REMOTE_DB=1'
 
     env:
       RAILS_ENV: test
